@@ -1,13 +1,17 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/api/events/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	"time"
 )
 
 var (
@@ -15,7 +19,7 @@ var (
 )
 
 func init() {
-	flag.StringVar(&kubeConfig, "kubeConfig", "", "Path to a kubeconfig")
+	flag.StringVar(&kubeConfig, "kubeConfig", "/root/.kube/config", "Path to a kubeconfig") //获取默认的config
 }
 
 func main() {
@@ -31,8 +35,48 @@ func main() {
 	if err != nil {
 		klog.Fatal("Error building kubernetes clientset: ", err)
 	}
-	deploy, err := client.AppsV1().Deployments("default").List(context.Background(), metav1.ListOptions{})
-	for _, v := range deploy.Items {
-		fmt.Println("deployName:", v.Name)
-	}
+	eventInFormerFactory := informers.NewSharedInformerFactory(client, time.Minute)
+	stopChan := make(chan struct{})
+	defer close(stopChan)
+
+	infromerEvent := eventInFormerFactory.Events().V1().Events().Informer()
+	addChan := make(chan v1.Event)
+	deleteChan := make(chan v1.Event)
+	infromerEvent.AddEventHandlerWithResyncPeriod(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			unstructObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+			if err != nil {
+				klog.Fatal("Error:", err)
+			}
+			event := &v1.Event{}
+			err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructObj, event)
+			if err != nil {
+				klog.Fatal("Event Error:", err)
+			}
+			addChan <- *event
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+
+		},
+		DeleteFunc: func(obj interface{}) {
+
+		},
+	}, 0)
+
+	go func() {
+		for {
+			select {
+			case event := <-addChan:
+				str, err := json.Marshal(&event)
+				if err != nil {
+					klog.Fatal("Json Error", err)
+				}
+				fmt.Println("Event:", string(str))
+				break
+			case <-deleteChan:
+				break
+			}
+		}
+	}()
+	infromerEvent.Run(stopChan)
 }
