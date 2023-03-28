@@ -1,82 +1,89 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	v1 "k8s.io/api/events/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/client-go/tools/clientcmd"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/klog/v2"
-	"time"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog"
 )
-
-var (
-	kubeConfig string
-)
-
-func init() {
-	flag.StringVar(&kubeConfig, "kubeConfig", "/root/.kube/config", "Path to a kubeconfig") //获取默认的config
-}
 
 func main() {
-	klog.InitFlags(nil)
-	flag.Parse()
-	clientConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
-
+	// 创建 Kubernetes 配置和客户端
+	config, err := clientcmd.BuildConfigFromFlags("", "kubeconfig")
 	if err != nil {
-		klog.Fatal("Error building kubeconfig: ", err)
+		panic(err.Error())
 	}
-	//获取客户端
-	client, err := kubernetes.NewForConfig(clientConfig)
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		klog.Fatal("Error building kubernetes clientset: ", err)
+		panic(err.Error())
 	}
-	eventInFormerFactory := informers.NewSharedInformerFactory(client, time.Minute)
-	stopChan := make(chan struct{})
-	defer close(stopChan)
 
-	infromerEvent := eventInFormerFactory.Events().V1().Events().Informer()
-	addChan := make(chan v1.Event)
-	deleteChan := make(chan v1.Event)
-	infromerEvent.AddEventHandlerWithResyncPeriod(cache.ResourceEventHandlerFuncs{
+	// 创建 informer 工厂
+	informerFactory := informers.NewSharedInformerFactory(clientset, time.Second*30)
+
+	// 创建 informer
+	eventInformer := informerFactory.Core().V1().Events().Informer()
+
+	// 创建一个工作队列
+	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+
+	// 定义事件处理程序
+	eventHandler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			unstructObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-			if err != nil {
-				klog.Fatal("Error:", err)
+			event, ok := obj.(*corev1.Event)
+			if !ok {
+				klog.Errorf("object is not an Event")
+				return
 			}
-			event := &v1.Event{}
-			err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructObj, event)
-			if err != nil {
-				klog.Fatal("Event Error:", err)
-			}
-			addChan <- *event
+			klog.Infof("kubernetes '%s' added", event.Name)
+			queue.Add(event)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-
+			event, ok := newObj.(*corev1.Event)
+			if !ok {
+				klog.Errorf("object is not an Event")
+				return
+			}
+			klog.Infof("kubernetes '%s' updated", event.Name)
+			queue.Add(event)
 		},
 		DeleteFunc: func(obj interface{}) {
-
-		},
-	}, 0)
-
-	go func() {
-		for {
-			select {
-			case event := <-addChan:
-				str, err := json.Marshal(&event)
-				if err != nil {
-					klog.Fatal("Json Error", err)
-				}
-				fmt.Println("Event:", string(str))
-				break
-			case <-deleteChan:
-				break
+			event, ok := obj.(*corev1.Event)
+			if !ok {
+				klog.Errorf("object is not an Event")
+				return
 			}
+			klog.Infof("kubernetes '%s' deleted", event.Name)
+			queue.Add(event)
+		},
+	}
+
+	// 注册事件处理程序
+	eventInformer.AddEventHandler(eventHandler)
+
+	// 启动 informer
+	informerFactory.Start(wait.NeverStop)
+
+	// 处理工作队列中的事件
+	for {
+		item, quit := queue.Get()
+		if quit {
+			break
 		}
-	}()
-	infromerEvent.Run(stopChan)
+		event, ok := item.(*corev1.Event)
+		if !ok {
+			klog.Errorf("item is not an Event")
+			queue.Forget(item)
+			continue
+		}
+		fmt.Printf("Processing kubernetes '%s'\n", event.Name)
+		queue.Forget(item)
+	}
 }
