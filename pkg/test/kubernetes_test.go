@@ -1,8 +1,8 @@
 package test
 
 import (
-	k8sclient "backend/config/kubeconfig"
-	"backend/kubernetes"
+	k8sclient "backend/pkg/client/kubernetes"
+	"backend/pkg/kubernetes"
 	"flag"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"testing"

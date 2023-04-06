@@ -1,9 +1,9 @@
 package main
 
 import (
-	k8sclient "backend/config/kubeconfig"
-	"backend/kubernetes"
-	"backend/sink/logs"
+	k8sclient "backend/pkg/client/kubernetes"
+	"backend/pkg/kubernetes"
+	"backend/pkg/sink/logs"
 	"flag"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
@@ -14,11 +14,11 @@ var (
 )
 
 const (
-	config = ""
+	config = "/Users/wucola/.kube/dev-rke.yaml"
 )
 
 func init() {
-	flag.StringVar(&kubeconfig, "kubeconfig", config, "Path to a kubeconfig. Only required if out-of-cluster.")
+	flag.StringVar(&kubeconfig, "kubernetes", config, "Path to a kubernetes. e.g./.kube/config.")
 
 }
 
@@ -39,5 +39,4 @@ func main() {
 		}
 		log.ExportEvent(event)
 	}
-
 }
