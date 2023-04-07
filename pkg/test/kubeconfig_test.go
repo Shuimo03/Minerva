@@ -1,7 +1,7 @@
 package test
 
 import (
-	k8sclient "backend/config/kubeconfig"
+	k8sclient "backend/pkg/client/kubernetes"
 	"flag"
 	"testing"
 )
@@ -15,7 +15,7 @@ const (
 )
 
 func init() {
-	flag.StringVar(&kubeconfig, "kubeconfig", config, "Path to a kubeconfig. Only required if out-of-cluster.")
+	flag.StringVar(&kubeconfig, "kubernetes", config, "Path to a kubernetes. Only required if out-of-cluster.")
 
 }
 

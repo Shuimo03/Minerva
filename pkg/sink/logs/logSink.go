@@ -4,6 +4,7 @@ import (
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/klog"
 )
 
 const (
@@ -26,5 +27,6 @@ func (l *LogSinker) ExportEvent(buffer []*corev1.Event) {
 			fmt.Println(err)
 		}
 		fmt.Println(string(bs))
+		klog.Infoln(string(bs))
 	}
 }
